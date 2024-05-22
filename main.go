@@ -1,16 +1,18 @@
 package main
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
-	"log/slog"
-	"net/http"
 	"os"
-	"time"
+
+	"github.com/tmc/langchaingo/llms"
+	"github.com/tmc/langchaingo/llms/ollama"
 )
+
+// dynamic arguments through path or CLI later
 
 func importData(path string) (string, map[string]interface{}, error) {
 	f, err := os.Open(path)
@@ -35,68 +37,55 @@ func importData(path string) (string, map[string]interface{}, error) {
 		log.Println("Json document doesn't have a flightDate field.")
 	}
 
-	//println(string(bb))
+	// test
+	beautifiedJSON, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return "", nil, err
+	}
+
+	fmt.Println(string(beautifiedJSON))
 
 	return string(bb), doc, nil
 }
 
-func postResponse() {
-	data, _, err := importData("data/flights.json")
+// add to CLI later
+// importData(os.Args[0])
+
+func main() {
+	llm, err := ollama.New(ollama.WithModel("llama3"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	flightsData, docs, err := importData("data/flights.json")
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	ctx := context.Background()
+	embs, err := llm.CreateEmbedding(ctx, []string{flightsData})
+	fmt.Printf("Got %d embeddings:\n", len(embs))
+	for i, emb := range embs {
+		fmt.Printf("%d: len=%d; first few=%v\n", i, len(emb), emb[:4])
+	}
 	prompt := fmt.Sprintf("give me the total number of canceled, scheduled, active, landed, incident, diverted, flighst"+
 		"with an extra explanation with the respective flight_date and airline for each canceled flight with the format "+
 		"'canceled': 10"+
-		" %s", data)
+		" %s", flightsData)
 
-	//url := "http://localhost:11434/api/chat"
-	//payload := map[string]interface{}{
-	//	"model": "llama3",
-	//	"messages": []map[string]string{
-	//		{
-	//			"role":    "user",
-	//			"content": prompt,
-	//		},
-	//	},
-	//	"format": "json",
-	//	"stream": true,
-	//}
-	url := "http://localhost:11434/api/generate"
-	payload := map[string]interface{}{
-		"model":  "llama3",
-		"prompt": prompt,
-		"stream": false,
+	completion, err := llm.Call(ctx, prompt,
+		llms.WithTemperature(0.8),
+		llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
+			fmt.Print(string(chunk))
+			return nil
+		}),
+		llms.WithMetadata(docs),
+	)
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	jsonPayload, err := json.Marshal(payload)
-	if err != nil {
-		log.Fatalf("Error marshalling JSON: %v", err)
-	}
-	startTime := time.Now()
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
-	if err != nil {
-		log.Fatalf("Error creating request: %v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
+	_ = completion
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Fatalf("Error sending request: %v", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Fatalf("Error reading response body: %v", err)
-	}
+	// change later for multiple imports
 
-	println(string(body))
-	duration := time.Since(startTime)
-	valueFromDuration := slog.DurationValue(duration)
-	slog.Info("Ollama job finished", slog.Attr{Key: "duration", Value: valueFromDuration})
-}
-func main() {
-	postResponse()
 }

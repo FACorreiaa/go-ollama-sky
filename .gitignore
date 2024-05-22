@@ -22,7 +22,7 @@ Modelfile
 .ruby-version
 dump.rdb
 main.tfvars
-api/data
+.test/data
 *.o
 *.a
 *.so
@@ -48,3 +48,4 @@ tailwindcss
 .env.docker
 report.xml
 data
+.test
